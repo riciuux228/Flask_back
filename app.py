@@ -4,6 +4,7 @@ from flask_cors import CORS
 
 from blueprints.article import article_blueprint  # 导入蓝图实例
 from blueprints.user import user_blueprint  # 导入蓝图实例
+from blueprints.comments import comments_blueprint  # 导入蓝图实例
 
 app = Flask(__name__)
 # 为整个app启用CORS
@@ -13,6 +14,7 @@ CORS(user_blueprint, resources={r"/*": {"origins": "*"}})  # 允许所有源访�
 # 注册蓝图
 app.register_blueprint(article_blueprint, url_prefix='/article')
 app.register_blueprint(user_blueprint, url_prefix='/user')
+app.register_blueprint(comments_blueprint, url_prefix='/comments')
 print(app.url_map) # 打印所有的路由，检查是否有冲突或遗漏
 
 if __name__ == '__main__':

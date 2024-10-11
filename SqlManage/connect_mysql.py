@@ -1,12 +1,13 @@
-import pymysql
-import json
 import logging
-from dbutils.pooled_db import PooledDB, InvalidConnectionError
+
+import pymysql
+from dbutils.pooled_db import PooledDB
+
 from SqlManage import config
 
 # 配置日志
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # 修改为 DEBUG 级别，确保所有日志输出
     format='%(asctime)s - %(levelname)s - %(message)s',
     filename='mysql_pool.log',
     filemode='w',
@@ -45,39 +46,41 @@ class MysqlPool:
         try:
             conn = self.__pool.connection()
             conn.ping(reconnect=True)  # 检查并重连
+            logger.debug("成功获取数据库连接")
             return conn
         except Exception as e:
-            logger.error(f"未能获得有效连接: {e}")
+            logger.error(f"获取数据库连接失败: {e}")
             raise
 
     def fetch(self, sql, args=None, one=False):
         conn = self.get_conn()
         try:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                logger.info(f"执行 SQL: {sql} with args: {args}")
+                logger.info(f"执行查询: {sql}, 参数: {args}")
                 cursor.execute(sql, args)
-                if one:
-                    result = cursor.fetchone()
-                else:
-                    result = cursor.fetchall()
+                result = cursor.fetchone() if one else cursor.fetchall()
+                logger.info(f"查询结果: {result}")
                 return result
         except Exception as e:
-            logger.error(f"执行时出错  SQL: {sql}, Error: {e}")
+            logger.error(f"查询执行失败: {sql}, 错误: {e}")
             raise
         finally:
             conn.close()
+            logger.debug("数据库连接已关闭")
 
     def execute(self, sql, args=None):
         conn = self.get_conn()
         try:
             with conn.cursor() as cursor:
-                logger.info(f"执行 SQL: {sql} with args: {args}")
+                logger.info(f"执行命令: {sql}, 参数: {args}")
                 result = cursor.execute(sql, args)
+                conn.commit()
+                logger.info(f"执行成功，影响行数: {result}")
                 return result
         except Exception as e:
-            logger.error(f"执行时出错 SQL: {sql}, Error: {e}")
+            logger.error(f"执行命令失败: {sql}, 错误: {e}")
+            conn.rollback()
             raise
         finally:
             conn.close()
-
-
+            logger.debug("数据库连接已关闭")

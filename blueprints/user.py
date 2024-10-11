@@ -1,12 +1,13 @@
+import logging
 import os
 import uuid
-from datetime import datetime, timedelta
-from werkzeug.utils import secure_filename
-from SqlManage.connect_mysql import MysqlPool
+from datetime import datetime
 from flask import Blueprint, jsonify, request, Flask
-import logging
-from functools import wraps
-import jwt
+from werkzeug.utils import secure_filename
+
+from Check.file_verify import allowed_file, save_file
+from Check.token_verify import token_required, generate_token
+from SqlManage.connect_mysql import MysqlPool
 
 # 配置日志
 logging.basicConfig(
@@ -18,89 +19,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SECRET_KEY = 'yy401'
+
 
 # 配置文件上传的路径和允许的文件格式
 UPLOAD_FOLDER = 'static/user_icons'  # 头像保存路径
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}  # 允许的文件格式
-
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-
-
-
-def allowed_file(filename):
-    """检查文件是否为允许的扩展名"""
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def generate_token(user_id, user_name):
-    """
-    生成 JWT token
-    """
-    payload = {
-        'user_id': user_id,
-        'user_name': user_name,
-        'exp': datetime.utcnow() + timedelta(hours=2),  # 2 小时后过期
-        'iat': datetime.utcnow()  # 签发时间
-    }
-    token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
-    print("生成的token:" + str(token))
-    return token
-
-def token_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        token = None
-
-        # 从请求头获取token
-        if 'Authorization' in request.headers:
-            print("Authorization:" + request.headers['Authorization'])
-            parts = request.headers['Authorization'].split()
-            print("parts:" + str(parts))
-            if len(parts) == 2 and parts[0].lower() == 'bearer':
-                token = parts[1]
-                print("token:" + token)
-            else:
-                print("Authorization header 格式不正确")
-                return jsonify({"error": "Authorization header must be in the format 'Bearer <token>'"}), 403
-
-        if not token:
-            print("Token缺失")
-            return jsonify({"error": "Token缺失，无法访问"}), 403
-
-        try:
-            # 尝试解码JWT
-            data = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-            print("Decoded token data: " + str(data))  # 打印解码后的JWT数据
-            current_user = data.get('user_id')
-            print("current_user:" + str(current_user))
-            print("user_id:" + str(data.get('user_id')))
-            if not current_user:
-                print("Token中缺少user_id")
-                return jsonify({"error": "Token中缺少user_id"}), 403
-        except jwt.ExpiredSignatureError:
-            print("Token已过期")
-            return jsonify({"error": "Token已过期"}), 403
-        except jwt.InvalidTokenError as e:
-            print(f"无效的Token: {e}")
-            return jsonify({"error": "无效的Token"}), 403
-        except Exception as e:
-            print(f"JWT解码过程中发生其他错误: {e}")
-            return jsonify({"error": "Token解码错误"}), 500
-
-        # 确保成功进入视图函数
-        print(type(current_user))
-        print(f"成功解码用户ID: {current_user}")
-        return f(current_user)
-
-    return decorated_function
 
 # 定义用户蓝图
 user_blueprint = Blueprint('user', __name__, template_folder='templates')
 
 mysql_pool = MysqlPool()  # 初始化连接池
-
 
 @user_blueprint.route('/check_permissions/<int:user_id>', methods=['GET'])
 @token_required
@@ -114,7 +44,6 @@ def check_Permissions(user_id):
     if result:
         return jsonify({"result": result['role']}), 200
     return jsonify({"error": "没有找到用户"}), 403
-
 
 @user_blueprint.route('/register', methods=['POST'])
 def register():
@@ -139,18 +68,15 @@ def register():
 
     # 处理头像上传
     avatar = request.files.get('avatar')
-    print("avatar:" + str(avatar))
     avatar_url = None
 
-    if avatar and allowed_file(avatar.filename):
-        # 使用 UUID 生成唯一文件名
-        unique_filename = f"{uuid.uuid4()}.{avatar.filename.rsplit('.', 1)[1].lower()}"
-        avatar_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(unique_filename))
-        avatar.save(avatar_path)
-        avatar_url = f"http://localhost:8080/{avatar_path}"  # 头像的 URL 路径
-
-    if(avatar_url == None):
-        avatar_url = "http://localhost:8080/static/user_icons/default.png"
+    if avatar:
+        avatar_path, error = save_file(avatar, app.config['UPLOAD_FOLDER'])
+        if error:
+            return jsonify({"error": error}), 400  # 文件保存失败，返回错误信息
+        avatar_url = f"http://localhost:8080/{avatar_path}"  # 成功保存后，返回URL路径
+        if avatar_url is None:
+            avatar_url = "http://localhost:8080/static/user_icons/default.png"
 
     created_at = updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -167,7 +93,6 @@ def register():
         logger.error(f"注册失败: {e}")
         return jsonify({"error": "注册失败"}), 500
 
-
 @user_blueprint.route('/send_code', methods=['POST'])
 def send_code():
     """
@@ -179,7 +104,6 @@ def send_code():
         return jsonify({"error": "参数不完整"}), 400
     random_code = '123456'  # 模拟发送验证码
     return jsonify({"random_code": random_code}, 200)
-
 
 @user_blueprint.route('/login', methods=['POST'])
 def login():
@@ -212,7 +136,6 @@ def login():
         "token": token
     }), 200
 
-
 @user_blueprint.route('/user_info/<int:user_id>', methods=['GET'])
 @token_required
 def user_info(current_user):
@@ -239,7 +162,6 @@ def user_info(current_user):
         # 捕获并打印任何数据库查询的异常
         print(f"数据库查询出错: {e}")
         return jsonify({"error": "服务器内部错误"}), 500
-
 
 """
     根据作者id获取该作者的所有文章
@@ -285,3 +207,48 @@ WHERE
         logger.error(f"获取作者 {auth_id} 的文章失败: {e}")
         return jsonify({"error": "获取文章失败"}), 500
 
+
+@user_blueprint.route('/update_profile', methods=['POST'])
+@token_required
+def update_profile(current_user):
+    """
+    更新用户信息
+    :param current_user: JWT解码出的用户ID
+    :return:
+    """
+    username = request.form.get('username')
+    password = request.form.get('password')
+    image = request.files.get('user_icon')  # 使用 .files 获取上传文件
+    user_icon_url = None
+
+    # 处理头像上传
+    if image:
+        user_icon_url, error = save_file(image, app.config['UPLOAD_FOLDER'])
+        if error:
+            return jsonify({"error": error}), 400
+        user_icon_url = f"http://localhost:8080/{user_icon_url}"
+
+    # 如果没有上传新的头像，获取用户的原头像
+    if user_icon_url is None:
+        query = 'SELECT user_icon_url FROM users WHERE id=%s'
+        result = mysql_pool.fetch(query, (current_user,), one=True)
+        user_icon_url = result['user_icon_url']
+
+    # 更新用户信息和密码（如果有新的密码）
+    if password:
+        query = 'UPDATE users SET username=%s, user_icon_url=%s, password=%s WHERE id=%s'
+        try:
+            mysql_pool.execute(query, (username, user_icon_url, password, current_user))
+        except Exception as e:
+            logger.error(f"更新用户信息失败: {e}")
+            return jsonify({"error": "更新用户信息失败"}), 500
+    else:
+        # 如果没有更新密码
+        query = 'UPDATE users SET username=%s, user_icon_url=%s WHERE id=%s'
+        try:
+            mysql_pool.execute(query, (username, user_icon_url, current_user))
+        except Exception as e:
+            logger.error(f"更新用户信息失败: {e}")
+            return jsonify({"error": "更新用户信息失败"}), 500
+
+    return jsonify({"result": "success"}), 200
