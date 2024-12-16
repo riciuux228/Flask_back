@@ -1,4 +1,5 @@
 import logging
+import socket
 import time
 import uuid
 from datetime import datetime
@@ -506,7 +507,22 @@ def generate_numeric_uuid():
     return str(abs(hash(uuid.uuid4())) % (2**31 - 1))  # 2147483647 是 INT 的最大值
 
 
+def get_local_ip():
+    """ 获取本机的局域网IP地址 """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # 使用Google的DNS服务器来获取本地IP
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception as e:
+        return "无法获取本机IP地址: " + str(e)
 
+@article_blueprint.route('/get_local_ip')
+def get_ip():
+    """ 返回本机局域网IP地址 """
+    local_ip = get_local_ip()
+    return jsonify({"local_ip": local_ip})
 
 
 

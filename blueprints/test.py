@@ -1,16 +1,16 @@
-import requests
+import socket
 
+def get_local_ip():
+    """ 获取本机的局域网IP地址 """
+    try:
+        # 通过UDP连接来获取本机IP地址（无需实际连接）
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))  # 使用Google的DNS服务器来获取本地IP
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception as e:
+        return "无法获取本机IP地址: " + str(e)
 
-# 测试注册功能
-def test_register():
-    data ={
-        "username": "test_user2",
-        "phone": "12345678903",
-        "password": "123456",
-        "role": "author"
-    }
-    response = requests.post('http://localhost:8080/user/register', json=data)
-    print(response.json())
-
-test_register()
-
+if __name__ == '__main__':
+    print(get_local_ip())
